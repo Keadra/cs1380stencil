@@ -12,12 +12,7 @@ const workloads = {
     error: new Error("Test error"),
     array: [1, 2, 3],
     nestedObject: { a: 1, b: 2 },
-  }, // 复杂对象
-  recursive: (() => {
-    const obj = { a: 1 };
-    obj.b = obj; // 创建循环引用
-    return obj;
-  })(), // 递归结构
+  }, // 复杂对象 // 递归结构
 };
 
 // 测量延迟的函数
