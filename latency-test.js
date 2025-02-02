@@ -1,16 +1,36 @@
 const { serialize, deserialize } = require("./distribution/util/serialization.js");
 const { performance } = require("perf_hooks");
-const assert = require("assert");
 
-// ---------------------------
-// Define workloads (including function objects)
-// ---------------------------
-const workloads = {
-  // Basic types: number, string, boolean, null, undefined
-  basic: { a: 42, b: "hello", c: true, d: null, e: undefined },
+// Utility function to generate a random alphanumeric string of a given length
+function generateRandomString(length) {
+  let result = "";
+  const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const charactersLength = characters.length;
+  for (let i = 0; i < length; i++) {
+    result += characters.charAt(Math.floor(Math.random() * charactersLength));
+  }
+  return result;
+}
 
-  // Complex object: includes Date, Error, array, and nested object
-  complex: {
+/**
+ * Generate a basic payload of approximately `sizeInBytes`.
+ * Here, we create an object with a single property containing a random string.
+ */
+function generateBasicPayload(sizeInBytes) {
+  const data = generateRandomString(sizeInBytes);
+  return { data };
+}
+
+/**
+ * Generate a complex payload of approximately `sizeInBytes`.
+ * This payload contains a mix of primitives, a date, an error, an array, a nested object,
+ * and a random string to bring the overall size near the target.
+ */
+function generateComplexPayload(sizeInBytes) {
+  // Estimate that the overhead for the fixed properties is ~200 bytes.
+  const extraLength = Math.max(sizeInBytes - 200, 0);
+  const data = generateRandomString(extraLength);
+  return {
     number: 42,
     string: "hello",
     boolean: true,
@@ -18,193 +38,95 @@ const workloads = {
     error: new Error("Test error"),
     array: [1, 2, 3],
     nestedObject: { a: 1, b: 2 },
-  },
+    data,
+  };
+}
 
-  // Recursive structure (for this example, a simple self-contained object)
-  recursive: (() => {
-    const obj = { a: 1 };
-    return obj;
-  })(),
-
-  // Function workload: includes function objects at different levels
-  functionWorkload: {
-    // A standard function
-    simpleFunction: function () {
-      return "hello world";
-    },
-    // An arrow function
-    arrowFunction: () => 42,
-    // A nested function inside an object
+/**
+ * Generate a function payload of approximately `sizeInBytes`.
+ * We build a function whose source includes a random string of roughly the target size.
+ * The overhead for a function definition is estimated at ~100 bytes.
+ */
+function generateFunctionPayload(sizeInBytes) {
+  const extraLength = Math.max(sizeInBytes - 100, 0);
+  const randomData = generateRandomString(extraLength);
+  // Use JSON.stringify to safely embed the random string in the function body.
+  const simpleFunction = new Function(`return ${JSON.stringify(randomData)};`);
+  
+  return {
+    simpleFunction,
+    arrowFunction: () => simpleFunction(),
     nested: {
       multiply: function (a, b) {
         return a * b;
       },
     },
-  },
-};
+  };
+}
 
-// ---------------------------
-// Latency Test Functions
-// ---------------------------
+/**
+ * Measure serialization and deserialization latency for a given workload.
+ * Returns the average latencies over a number of iterations and the final serialized size.
+ */
 function measureLatency(workload, iterations = 100) {
   const serializeTimes = [];
   const deserializeTimes = [];
+  let serialized;
 
   for (let i = 0; i < iterations; i++) {
-    // Measure serialization time
+    // Measure serialization latency
     const startSerialize = performance.now();
-    const serialized = serialize(workload);
+    serialized = serialize(workload);
     const endSerialize = performance.now();
     serializeTimes.push(endSerialize - startSerialize);
 
-    // Measure deserialization time
+    // Measure deserialization latency
     const startDeserialize = performance.now();
     deserialize(serialized);
     const endDeserialize = performance.now();
     deserializeTimes.push(endDeserialize - startDeserialize);
   }
 
-  // Calculate average latencies
   const avgSerializeLatency =
-    serializeTimes.reduce((sum, time) => sum + time, 0) / iterations;
+    serializeTimes.reduce((sum, t) => sum + t, 0) / iterations;
   const avgDeserializeLatency =
-    deserializeTimes.reduce((sum, time) => sum + time, 0) / iterations;
+    deserializeTimes.reduce((sum, t) => sum + t, 0) / iterations;
+  // Calculate the byte length of the serialized string (assuming UTF-8 encoding)
+  const serializedSize = Buffer.byteLength(serialized, "utf8");
 
-  return { avgSerializeLatency, avgDeserializeLatency };
-}
-
-function runLatencyTests() {
-  const results = {};
-
-  for (const [name, workload] of Object.entries(workloads)) {
-    results[name] = measureLatency(workload);
-  }
-
-  console.log("=== Latency Results ===");
-  for (const [name, { avgSerializeLatency, avgDeserializeLatency }] of Object.entries(results)) {
-    console.log(`Workload: ${name}`);
-    console.log(`  Average Serialize Latency: ${avgSerializeLatency.toFixed(4)} ms`);
-    console.log(`  Average Deserialize Latency: ${avgDeserializeLatency.toFixed(4)} ms`);
-  }
-}
-
-// ---------------------------
-// Correctness (Round-Trip) Tests
-// ---------------------------
-
-/**
- * Test that the basic workload survives a serialize/deserialize round-trip.
- */
-function testBasicRoundTrip() {
-  const workload = workloads.basic;
-  const serialized = serialize(workload);
-  const deserialized = deserialize(serialized);
-
-  // Check each property.
-  assert.strictEqual(deserialized.a, 42);
-  assert.strictEqual(deserialized.b, "hello");
-  assert.strictEqual(deserialized.c, true);
-  assert.strictEqual(deserialized.d, null);
-  // Depending on your implementation, undefined properties might be omitted.
-  if (Object.prototype.hasOwnProperty.call(deserialized, "e")) {
-    assert.strictEqual(deserialized.e, undefined);
-  }
+  return { avgSerializeLatency, avgDeserializeLatency, serializedSize };
 }
 
 /**
- * Test that the complex workload survives a serialize/deserialize round-trip.
+ * Run latency tests for basic, complex, and function workloads of a given payload size.
  */
-function testComplexRoundTrip() {
-  const workload = workloads.complex;
-  const serialized = serialize(workload);
-  const deserialized = deserialize(serialized);
+function runLatencyTestsForSize(payloadSize) {
+  console.log(`\n=== Latency Tests for Payload Size: ${payloadSize} bytes ===`);
 
-  assert.strictEqual(deserialized.number, 42);
-  assert.strictEqual(deserialized.string, "hello");
-  assert.strictEqual(deserialized.boolean, true);
+  const basicPayload = generateBasicPayload(payloadSize);
+  const complexPayload = generateComplexPayload(payloadSize);
+  const functionPayload = generateFunctionPayload(payloadSize);
 
-  // For dates, check that the deserialized value is a Date instance with the same time.
-  assert.ok(deserialized.date instanceof Date, "date should be a Date");
-  assert.strictEqual(deserialized.date.getTime(), workload.date.getTime());
+  const basicResults = measureLatency(basicPayload);
+  const complexResults = measureLatency(complexPayload);
+  const functionResults = measureLatency(functionPayload);
 
-  // For errors, check that the deserialized value is an Error with the same message.
-  assert.ok(deserialized.error instanceof Error, "error should be an Error");
-  assert.strictEqual(deserialized.error.message, workload.error.message);
+  console.log("\nBasic Payload:");
+  console.log(`  Serialized Size: ${basicResults.serializedSize} bytes`);
+  console.log(`  Avg Serialize Latency: ${basicResults.avgSerializeLatency.toFixed(4)} ms`);
+  console.log(`  Avg Deserialize Latency: ${basicResults.avgDeserializeLatency.toFixed(4)} ms`);
 
-  // Check array and nested object
-  assert.deepStrictEqual(deserialized.array, [1, 2, 3]);
-  assert.deepStrictEqual(deserialized.nestedObject, { a: 1, b: 2 });
+  console.log("\nComplex Payload:");
+  console.log(`  Serialized Size: ${complexResults.serializedSize} bytes`);
+  console.log(`  Avg Serialize Latency: ${complexResults.avgSerializeLatency.toFixed(4)} ms`);
+  console.log(`  Avg Deserialize Latency: ${complexResults.avgDeserializeLatency.toFixed(4)} ms`);
+
+  console.log("\nFunction Payload:");
+  console.log(`  Serialized Size: ${functionResults.serializedSize} bytes`);
+  console.log(`  Avg Serialize Latency: ${functionResults.avgSerializeLatency.toFixed(4)} ms`);
+  console.log(`  Avg Deserialize Latency: ${functionResults.avgDeserializeLatency.toFixed(4)} ms`);
 }
 
-/**
- * Test that the recursive workload survives a serialize/deserialize round-trip.
- */
-function testRecursiveRoundTrip() {
-  const workload = workloads.recursive;
-  const serialized = serialize(workload);
-  const deserialized = deserialize(serialized);
-  // Since the sample recursive workload is simply { a: 1 }, check that.
-  assert.strictEqual(deserialized.a, 1);
-}
-
-/**
- * Test that the function workload survives a serialize/deserialize round-trip.
- * This verifies that function objects are correctly restored and remain callable.
- */
-function testFunctionRoundTrip() {
-  const workload = workloads.functionWorkload;
-  const serialized = serialize(workload);
-  const deserialized = deserialize(serialized);
-
-  // Test simpleFunction
-  assert.strictEqual(typeof deserialized.simpleFunction, "function", "simpleFunction should be a function");
-  assert.strictEqual(deserialized.simpleFunction(), "hello world", "simpleFunction should return 'hello world'");
-
-  // Test arrowFunction
-  assert.strictEqual(typeof deserialized.arrowFunction, "function", "arrowFunction should be a function");
-  assert.strictEqual(deserialized.arrowFunction(), 42, "arrowFunction should return 42");
-
-  // Test nested.multiply
-  assert.ok(deserialized.nested && typeof deserialized.nested.multiply === "function", "nested.multiply should be a function");
-  assert.strictEqual(deserialized.nested.multiply(3, 4), 12, "nested.multiply should return 12 when given 3 and 4");
-}
-
-function runCorrectnessTests() {
-  console.log("\n=== Correctness Tests ===");
-  try {
-    testBasicRoundTrip();
-    console.log("Basic workload round-trip: PASS");
-  } catch (error) {
-    console.error("Basic workload round-trip: FAIL");
-    console.error(error);
-  }
-
-  try {
-    testComplexRoundTrip();
-    console.log("Complex workload round-trip: PASS");
-  } catch (error) {
-    console.error("Complex workload round-trip: FAIL");
-    console.error(error);
-  }
-
-  try {
-    testRecursiveRoundTrip();
-    console.log("Recursive workload round-trip: PASS");
-  } catch (error) {
-    console.error("Recursive workload round-trip: FAIL");
-    console.error(error);
-  }
-
-  try {
-    testFunctionRoundTrip();
-    console.log("Function workload round-trip: PASS");
-  } catch (error) {
-    console.error("Function workload round-trip: FAIL");
-    console.error(error);
-  }
-}
-
-// ---------------------------
-// Execute Tests
-// ---------------------------
-runLatencyTests();
+// Run tests for a payload size of ~1KB (1024 bytes)
+const PAYLOAD_SIZE = 1024;
+runLatencyTestsForSize(PAYLOAD_SIZE);
