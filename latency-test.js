@@ -1,4 +1,4 @@
-const { serialize, deserialize } = require("./serializer");
+const { serialize, deserialize } = require("./distribution/util/serialization.js");
 const { performance } = require("perf_hooks");
 
 // 定义三种工作负载
