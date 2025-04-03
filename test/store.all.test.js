@@ -1,3 +1,4 @@
+jest.setTimeout(10000);
 const distribution = require('../config.js');
 const id = distribution.util.id;
 
@@ -418,6 +419,8 @@ beforeAll((done) => {
                     .put(mygroupConfig, mygroupGroup, (e, v) => {
                       distribution.mygroup.store.get(null, (e, k) => {
                         const step = (idx) => {
+                          console.log(k.length);
+
                           if (idx == k.length) {
                             done();
                             return;

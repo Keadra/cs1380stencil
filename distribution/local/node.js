@@ -1,86 +1,141 @@
 const http = require('http');
 const url = require('url');
 const log = require('../util/log');
+const serialization = require('../util/serialization');
 
-
-/*
-    The start function will be called to start your node.
-    It will take a callback as an argument.
-    After your node has booted, you should call the callback.
-*/
-
+if (!global.toLocal) {
+  global.toLocal = {};
+}
 
 const start = function(callback) {
+  if (!global.distribution) {
+    global.distribution = {};
+  }
+  if (!global.distribution.local) {
+    global.distribution.local = {};
+  }
+  if (!global.distribution.local.status) {
+    global.distribution.local.status = require('./status');
+  }
+  if (!global.distribution.local.routes) {
+    global.distribution.local.routes = require('./routes');
+  }
+  if (!global.distribution.local.comm) {
+    global.distribution.local.comm = require('./comm');
+  }
+  if (!global.distribution.local.groups) {
+    global.distribution.local.groups = require('./groups');
+  }
+
+  if (!global.distribution.all) {
+    global.distribution.all = {
+      comm: require('../all/comm')({ gid: 'all' }),
+      status: require('../all/status')({ gid: 'all' }),
+      groups: require('../all/groups')({ gid: 'all' }),
+      routes: require('../all/routes')({ gid: 'all' }),
+    };
+  }
+
   const server = http.createServer((req, res) => {
-    /* Your server will be listening for PUT requests. */
+    if (req.method !== 'PUT') {
+      res.statusCode = 405;
+      return res.end('PUT request only');
+    }
 
-    // Write some code...
+    const parsedUrl = url.parse(req.url, true);
+    const pathSegments = parsedUrl.pathname.split('/').filter(Boolean);
 
+    let gid, serviceName, methodName;
+    if (pathSegments.length === 2) {
+      [serviceName, methodName] = pathSegments;
+      gid = 'local'; 
+    } else if (pathSegments.length === 3) {
+      [gid, serviceName, methodName] = pathSegments;
+    } else {
+      res.statusCode = 400;
+      return res.end('Invalid path format');
+    }
 
-    /*
-      The path of the http request will determine the service to be used.
-      The url will have the form: http://node_ip:node_port/service/method
-    */
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
 
+    req.on('end', () => {
+      let payload;
+      try {
+        payload = serialization.deserialize(JSON.parse(body));
+      } catch (error) {
+        res.statusCode = 400;
+        const errorResponse = serialization.serialize([error, null]);
+        return res.end(JSON.stringify(errorResponse));
+      }
 
-    // Write some code...
+      if (global.toLocal && serviceName in global.toLocal) {
+        const rpcFunc = global.toLocal[serviceName];
+        delete global.toLocal[serviceName];
+        
+        try {
+          rpcFunc(...payload);
+          const successResponse = serialization.serialize([null, true]);
+          res.statusCode = 200;
+          return res.end(JSON.stringify(successResponse));
+        } catch (error) {
+          const errorResponse = serialization.serialize([error, null]);
+          res.statusCode = 500;
+          return res.end(JSON.stringify(errorResponse));
+        }
+      }
 
+      const groupObj = global.distribution[gid];
+      if (!groupObj) {
+        const errorResponse = serialization.serialize([new Error(`Group not found: ${gid}`), null]);
+        res.statusCode = 404;
+        return res.end(JSON.stringify(errorResponse));
+      }
 
-    /*
+      const service = groupObj[serviceName];
+      if (!service || typeof service[methodName] !== 'function') {
+        const errorResponse = serialization.serialize([new Error(`Service not found: ${serviceName}.${methodName}`), null]);
+        res.statusCode = 404;
+        return res.end(JSON.stringify(errorResponse));
+      }
 
-      A common pattern in handling HTTP requests in Node.js is to have a
-      subroutine that collects all the data chunks belonging to the same
-      request. These chunks are aggregated into a body variable.
-
-      When the req.on('end') event is emitted, it signifies that all data from
-      the request has been received. Typically, this data is in the form of a
-      string. To work with this data in a structured format, it is often parsed
-      into a JSON object using JSON.parse(body), provided the data is in JSON
-      format.
-
-      Our nodes expect data in JSON format.
-  */
-
-    // Write some code...
-
-
-      /* Here, you can handle the service requests. */
-
-      // Write some code...
-
-      const serviceName = service;
-
-
-
-        // Write some code...
-
+      service[methodName](...payload, (error, result) => {
+        const response = serialization.serialize([error, result]);
+        res.statusCode = error instanceof Error ? 500 : 200;
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify(response));
+      });
+    });
   });
-
-
-  // Write some code...
-
-  /*
-    Your server will be listening on the port and ip specified in the config
-    You'll be calling the `callback` callback when your server has successfully
-    started.
-
-    At some point, we'll be adding the ability to stop a node
-    remotely through the service interface.
-  */
 
   server.listen(global.nodeConfig.port, global.nodeConfig.ip, () => {
     log(`Server running at http://${global.nodeConfig.ip}:${global.nodeConfig.port}/`);
+
+    if (!global.distribution.node) {
+      global.distribution.node = {};
+    }
     global.distribution.node.server = server;
-    callback(server);
+
+    const onStart = global.nodeConfig.onStart;
+    if (typeof onStart === 'function') {
+      onStart(server);
+    }
+
+    if (callback) {
+      callback(server);
+    }
   });
 
   server.on('error', (error) => {
-    // server.close();
     log(`Server error: ${error}`);
-    throw error;
+    if (callback) {
+      callback(error);
+    }
   });
 };
 
 module.exports = {
-  start: start,
+  start,
 };

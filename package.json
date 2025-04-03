@@ -1,9 +1,14 @@
 {
-  "name": "cs1380-stencil",
-  "version": "0.1.4",
+  "name": "cs1380:m3",
+  "author": {
+    "name": "<Chengye Hao?>",
+    "email": "<chengye_hao@brown.edu?>",
+    "cslogin": "<chao6?>"
+    },
+  "version": "0.1.18",
   "description": "A library for building distributed systems.",
   "main": "distribution.js",
-  "useLibrary": true,
+  "useLibrary": false,
   "directories": {
     "test": "test"
   },
@@ -13,6 +18,7 @@
     "javascript-obfuscator": "^4.1.0",
     "jest": "^27.4.7"
   },
+
   "scripts": {
     "pretest": "./scripts/pretest.sh",
     "test": "./scripts/test.sh",
@@ -24,5 +30,25 @@
   "dependencies": {
     "yargs": "^17.7.2",
     "@brown-ds/distribution": "latest"
+  },
+
+  "report": {
+    "hours": 4,
+     "loc" : 140,
+     "dev": {
+     "cpu-no": 20,
+    "mem-gb": 31.6,
+       "ssd-gb": 1843.2
+     },
+    "throughput": {
+      "dev": ["word frequency: 1500words/s"],
+      "aws": [""]
+    },
+    "latency": {
+      "dev": ["word frequency: 0.6s/document"],
+      "aws": [""]
+    },
+    "dloc": -99
   }
 }
+

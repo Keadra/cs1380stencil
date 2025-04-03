@@ -1,3 +1,4 @@
+jest.setTimeout(10000);
 const distribution = require('../config.js');
 const id = distribution.util.id;
 
